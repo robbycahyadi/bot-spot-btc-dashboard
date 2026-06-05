@@ -1,0 +1,18 @@
+[Unit]
+Description=Bot Spot BTC Dashboard — read-only Streamlit monitoring dashboard
+After=network.target postgresql.service
+
+[Service]
+Environment=PYTHONUNBUFFERED=1
+Type=simple
+User=duck
+WorkingDirectory=/home/duck/projects/bot-spot-btc-dashboard
+ExecStart=/home/duck/projects/bot-spot-btc-dashboard/.venv/bin/streamlit run dashboard.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot-spot-btc-dashboard
+
+[Install]
+WantedBy=multi-user.target
