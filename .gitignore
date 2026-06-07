@@ -1,0 +1,38 @@
+# Credentials — JANGAN PERNAH COMMIT
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs & data
+*.log
+*.csv
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
