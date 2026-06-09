@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 
+_PAGE_SIZES = [25, 50, 100]
+
 
 def render(conn):
     st.header("Trade History")
@@ -29,14 +31,14 @@ def render(conn):
         st.info("No closed trades yet.")
         return
 
-    # Filters
+    # ── Filters ───────────────────────────────────────────────────────────────
     col1, col2 = st.columns(2)
     with col1:
         pairs = ["All"] + sorted(df["pair"].dropna().unique().tolist())
-        selected_pair = st.selectbox("Filter by pair", pairs)
+        selected_pair = st.selectbox("Filter by pair", pairs, key="spt_tr_pair")
     with col2:
         outcome_options = ["All", "Win", "Loss", "Breakeven"]
-        selected_outcome = st.selectbox("Filter by outcome", outcome_options)
+        selected_outcome = st.selectbox("Filter by outcome", outcome_options, key="spt_tr_outcome")
 
     filtered = df.copy()
     if selected_pair != "All":
@@ -48,14 +50,39 @@ def render(conn):
     elif selected_outcome == "Breakeven":
         filtered = filtered[filtered["pnl_usd"] == 0]
 
-    st.caption(f"Showing {len(filtered)} of {len(df)} trades")
-
     if filtered.empty:
         st.info("No trades match the selected filters.")
         return
 
-    # Format display
-    display = filtered.copy()
+    # ── Pagination ────────────────────────────────────────────────────────────
+    total_rows = len(filtered)
+    page_size = st.selectbox("Baris per halaman", _PAGE_SIZES, index=1, key="spt_tr_page_size")
+    total_pages = max(1, -(-total_rows // page_size))
+
+    filter_key = (selected_pair, selected_outcome, page_size)
+    if st.session_state.get("spt_tr_filter_key") != filter_key:
+        st.session_state["spt_tr_filter_key"] = filter_key
+        st.session_state["spt_tr_page"] = 1
+
+    page = st.session_state.get("spt_tr_page", 1)
+    page = max(1, min(page, total_pages))
+    st.session_state["spt_tr_page"] = page
+
+    col_prev, col_info, col_next = st.columns([1, 4, 1])
+    with col_prev:
+        if st.button("← Prev", key="spt_tr_prev", disabled=page <= 1):
+            st.session_state["spt_tr_page"] -= 1
+            st.rerun()
+    with col_info:
+        st.caption(f"Halaman **{page}** dari **{total_pages}** · {total_rows} dari {len(df)} trades")
+    with col_next:
+        if st.button("Next →", key="spt_tr_next", disabled=page >= total_pages):
+            st.session_state["spt_tr_page"] += 1
+            st.rerun()
+
+    # ── Display table (current page, formatted) ───────────────────────────────
+    start = (page - 1) * page_size
+    display = filtered.iloc[start : start + page_size].copy()
     display["pnl_pct"] = display["pnl_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "—")
     display["pnl_usd"] = display["pnl_usd"].map(lambda x: f"${x:,.2f}" if pd.notna(x) else "—")
     display["entry_price"] = display["entry_price"].map(lambda x: f"{x:,.4f}" if pd.notna(x) else "—")

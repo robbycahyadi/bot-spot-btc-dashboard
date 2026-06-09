@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import date, timedelta
+
+_PAGE_SIZES = [25, 50, 100]
 
 
 def render(conn):
@@ -62,7 +65,7 @@ def _render_summary_metrics(conn):
     c3.metric("Profit Factor", pf_display)
     c4.metric("Net PnL (after fees)", f"${net_pnl:,.2f}", delta=f"${net_pnl:,.2f}")
 
-    c5, c6, _ , __ = st.columns(4)
+    c5, c6, _, __ = st.columns(4)
     c5.metric("Total Fees", f"${total_fees:,.2f}")
     c6.metric("Total Funding Paid", f"${total_funding:,.2f}")
 
@@ -134,7 +137,33 @@ def _render_open_positions(conn):
         st.info("No open futures positions.")
         return
 
-    st.dataframe(df, use_container_width=True)
+    # ── Pagination ────────────────────────────────────────────────────────────
+    total_rows = len(df)
+    page_size = st.selectbox("Baris per halaman", _PAGE_SIZES, index=1, key="fut_pos_page_size")
+    total_pages = max(1, -(-total_rows // page_size))
+
+    if st.session_state.get("fut_pos_page_size_prev") != page_size:
+        st.session_state["fut_pos_page_size_prev"] = page_size
+        st.session_state["fut_pos_page"] = 1
+
+    page = st.session_state.get("fut_pos_page", 1)
+    page = max(1, min(page, total_pages))
+    st.session_state["fut_pos_page"] = page
+
+    col_prev, col_info, col_next = st.columns([1, 4, 1])
+    with col_prev:
+        if st.button("← Prev", key="fut_pos_prev", disabled=page <= 1):
+            st.session_state["fut_pos_page"] -= 1
+            st.rerun()
+    with col_info:
+        st.caption(f"Halaman **{page}** dari **{total_pages}** · {total_rows} posisi")
+    with col_next:
+        if st.button("Next →", key="fut_pos_next", disabled=page >= total_pages):
+            st.session_state["fut_pos_page"] += 1
+            st.rerun()
+
+    start = (page - 1) * page_size
+    st.dataframe(df.iloc[start : start + page_size], use_container_width=True)
 
 
 def _render_trade_history(conn):
@@ -169,16 +198,17 @@ def _render_trade_history(conn):
         st.info("No closed futures trades yet.")
         return
 
+    # ── Filters ───────────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
     with col1:
-        side_options = ["All", "long", "short"]
-        selected_side = st.selectbox("Filter by side", side_options, key="fut_side")
+        selected_side = st.selectbox("Filter by side", ["All", "long", "short"], key="fut_side")
     with col2:
         pairs = ["All"] + sorted(df["pair"].dropna().unique().tolist())
         selected_pair = st.selectbox("Filter by pair", pairs, key="fut_pair")
     with col3:
-        outcome_options = ["All", "Win", "Loss", "Breakeven"]
-        selected_outcome = st.selectbox("Filter by outcome", outcome_options, key="fut_outcome")
+        selected_outcome = st.selectbox(
+            "Filter by outcome", ["All", "Win", "Loss", "Breakeven"], key="fut_outcome"
+        )
 
     filtered = df.copy()
     if selected_side != "All":
@@ -192,13 +222,39 @@ def _render_trade_history(conn):
     elif selected_outcome == "Breakeven":
         filtered = filtered[filtered["pnl_usd"] == 0]
 
-    st.caption(f"Showing {len(filtered)} of {len(df)} trades")
-
     if filtered.empty:
         st.info("No trades match the selected filters.")
         return
 
-    display = filtered.copy()
+    # ── Pagination ────────────────────────────────────────────────────────────
+    total_rows = len(filtered)
+    page_size = st.selectbox("Baris per halaman", _PAGE_SIZES, index=1, key="fut_tr_page_size")
+    total_pages = max(1, -(-total_rows // page_size))
+
+    filter_key = (selected_side, selected_pair, selected_outcome, page_size)
+    if st.session_state.get("fut_tr_filter_key") != filter_key:
+        st.session_state["fut_tr_filter_key"] = filter_key
+        st.session_state["fut_tr_page"] = 1
+
+    page = st.session_state.get("fut_tr_page", 1)
+    page = max(1, min(page, total_pages))
+    st.session_state["fut_tr_page"] = page
+
+    col_prev, col_info, col_next = st.columns([1, 4, 1])
+    with col_prev:
+        if st.button("← Prev", key="fut_tr_prev", disabled=page <= 1):
+            st.session_state["fut_tr_page"] -= 1
+            st.rerun()
+    with col_info:
+        st.caption(f"Halaman **{page}** dari **{total_pages}** · {total_rows} dari {len(df)} trades")
+    with col_next:
+        if st.button("Next →", key="fut_tr_next", disabled=page >= total_pages):
+            st.session_state["fut_tr_page"] += 1
+            st.rerun()
+
+    # ── Display table (current page, formatted) ───────────────────────────────
+    start = (page - 1) * page_size
+    display = filtered.iloc[start : start + page_size].copy()
     for col in ["pnl_pct"]:
         display[col] = display[col].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "—")
     for col in ["pnl_usd", "gross_pnl_usd", "total_fee_usd", "funding_rate_paid"]:
@@ -211,6 +267,28 @@ def _render_trade_history(conn):
 
 def _render_signal_log(conn):
     st.subheader("Signal Log")
+
+    today = date.today()
+    default_from = today - timedelta(days=7)
+
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+    with col1:
+        date_from = st.date_input("Dari", value=default_from, key="fut_sig_date_from")
+    with col2:
+        date_to = st.date_input("Sampai", value=today, key="fut_sig_date_to")
+    with col3:
+        pair_filter = st.selectbox("Pair", ["All", "BTC/USDT", "ETH/USDT"], key="fut_sig_pair")
+    with col4:
+        entry_filter = st.selectbox(
+            "Entry Triggered",
+            ["All", "Entry only", "Rejected only"],
+            key="fut_sig_entry",
+        )
+
+    bias_filter = st.selectbox(
+        "Bias Direction", ["All", "LONG", "SHORT", "NEUTRAL"], key="fut_sig_bias"
+    )
+
     try:
         query = """
             SELECT
@@ -225,35 +303,89 @@ def _render_signal_log(conn):
                 funding_rate,
                 reject_reasons
             FROM signals
+            WHERE timestamp::date BETWEEN %(date_from)s AND %(date_to)s
             ORDER BY timestamp DESC
-            LIMIT 500
         """
-        df = pd.read_sql(query, conn, parse_dates=["timestamp"])
+        df = pd.read_sql(
+            query,
+            conn,
+            params={"date_from": date_from, "date_to": date_to},
+            parse_dates=["timestamp"],
+        )
     except Exception as e:
         st.error(f"Failed to load futures signal log: {e}")
         return
 
     if df.empty:
-        st.info("No futures signal data yet.")
+        st.info("No futures signal data for the selected date range.")
         return
 
-    col1, col2 = st.columns(2)
-    with col1:
-        bias_opts = ["All"] + sorted(df["bias_direction"].dropna().unique().tolist())
-        selected_bias = st.selectbox("Filter by bias", bias_opts, key="fut_sig_bias")
-    with col2:
-        temp_opts = ["All"] + sorted(df["temperature"].dropna().unique().tolist())
-        selected_temp = st.selectbox("Filter by temperature", temp_opts, key="fut_sig_temp")
+    if pair_filter != "All":
+        df = df[df["pair"] == pair_filter]
+    if entry_filter == "Entry only":
+        df = df[df["entry_triggered"] == True]   # noqa: E712
+    elif entry_filter == "Rejected only":
+        df = df[df["entry_triggered"] == False]  # noqa: E712
+    if bias_filter != "All":
+        df = df[df["bias_direction"] == bias_filter]
 
-    filtered = df.copy()
-    if selected_bias != "All":
-        filtered = filtered[filtered["bias_direction"] == selected_bias]
-    if selected_temp != "All":
-        filtered = filtered[filtered["temperature"] == selected_temp]
+    if df.empty:
+        st.info("No signals match the current filters.")
+        return
 
-    st.dataframe(filtered, use_container_width=True)
+    # ── Download CSV (all filtered rows) ──────────────────────────────────────
+    pair_slug = pair_filter.replace("/", "-").lower()
+    csv_filename = f"futures_signals_{pair_slug}_{date_from}_{date_to}.csv"
+    st.download_button(
+        label="Download CSV",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name=csv_filename,
+        mime="text/csv",
+    )
 
-    _render_futures_reject_breakdown(filtered)
+    # ── Pagination ────────────────────────────────────────────────────────────
+    total_rows = len(df)
+    page_size = st.selectbox(
+        "Baris per halaman", _PAGE_SIZES, index=1, key="fut_sig_page_size"
+    )
+    total_pages = max(1, -(-total_rows // page_size))
+
+    filter_key = (str(date_from), str(date_to), pair_filter, entry_filter, bias_filter, page_size)
+    if st.session_state.get("fut_sig_filter_key") != filter_key:
+        st.session_state["fut_sig_filter_key"] = filter_key
+        st.session_state["fut_sig_page"] = 1
+
+    page = st.session_state.get("fut_sig_page", 1)
+    page = max(1, min(page, total_pages))
+    st.session_state["fut_sig_page"] = page
+
+    col_prev, col_info, col_next = st.columns([1, 4, 1])
+    with col_prev:
+        if st.button("← Prev", key="fut_sig_prev", disabled=page <= 1):
+            st.session_state["fut_sig_page"] -= 1
+            st.rerun()
+    with col_info:
+        st.caption(f"Halaman **{page}** dari **{total_pages}** · {total_rows} sinyal total")
+    with col_next:
+        if st.button("Next →", key="fut_sig_next", disabled=page >= total_pages):
+            st.session_state["fut_sig_page"] += 1
+            st.rerun()
+
+    # ── Display table (current page only) ────────────────────────────────────
+    start = (page - 1) * page_size
+    page_df = df.iloc[start : start + page_size].copy()
+    page_df["reject_reasons"] = page_df["reject_reasons"].apply(_truncate)
+    st.dataframe(page_df, use_container_width=True)
+
+    # Reject breakdown uses full filtered df, not just current page
+    _render_futures_reject_breakdown(df)
+
+
+def _truncate(val, max_len=80):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    text = str(val)
+    return text if len(text) <= max_len else text[:max_len] + "…"
 
 
 def _render_futures_reject_breakdown(df):

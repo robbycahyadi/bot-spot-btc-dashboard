@@ -1,5 +1,56 @@
 # DEV-NOTES — bot-spot-btc-dashboard
 
+## 2026-06-09 — Paginasi semua tabel
+
+### What changed
+
+Semua tabel `st.dataframe` kini punya paginasi seragam: tombol **← Prev** / **Next →**, info halaman, dan selectbox **Baris per halaman** (25 / 50 / 100). Page state di `st.session_state`; ganti filter otomatis reset ke halaman 1.
+
+| File | Fungsi | Session key prefix |
+|------|--------|--------------------|
+| `signals.py` | `render` (signal log) | `sig_` |
+| `trades.py` | `render` (spot trade history) | `spt_tr_` |
+| `overview.py` | `_render_open_positions` | `spt_pos_` |
+| `futures.py` | `_render_open_positions` | `fut_pos_` |
+| `futures.py` | `_render_trade_history` | `fut_tr_` |
+| `futures.py` | `_render_signal_log` | `fut_sig_` |
+
+- `portfolio.py` `_render_bot_summary_table` dikecualikan — hanya 2 baris (per bot), paginasi tidak relevan.
+- CSV download (signal log) dan reject breakdown pie chart tetap menggunakan **seluruh data terfilter**, bukan hanya halaman aktif.
+
+---
+
+## 2026-06-09 — Spot signal log fix + Futures signal log filter update
+
+### What changed
+
+**`components/signals.py` — bug fix**
+- Reverted SELECT to only columns that exist in the spot `signals` table: `timestamp`, `pair`, `entry_triggered`, `confluence_score`, `reject_reasons`.
+- Removed `signal_type`, `bias_direction`, `temperature` — these columns do **not** exist in the spot DB and caused a PostgreSQL error.
+- Display table now shows 5 columns: timestamp, pair, entry_triggered, confluence_score, reject_reasons.
+- All filters (date range, pair, entry triggered, row limit) and CSV export retained.
+
+**`components/futures.py` — `_render_signal_log` updated to match spot UX**
+- Added date range filter (Dari / Sampai), default last 7 days; applied in SQL `WHERE timestamp::date BETWEEN`.
+- Added Pair filter selectbox: All / BTC/USDT / ETH/USDT.
+- Added Entry Triggered filter: All / Entry only / Rejected only.
+- Added Bias Direction filter: All / LONG / SHORT / NEUTRAL.
+- Added row limit selectbox: 50 / 100 / 500 / All, default 50.
+- Added CSV download button — filename: `futures_signals_{pair}_{date_from}_{date_to}.csv`.
+- `reject_reasons` truncated to 80 chars in display table; full value in CSV.
+- Added `_truncate()` helper (same as in `signals.py`).
+
+### Spot signals table schema (confirmed columns only)
+`timestamp, pair, entry_triggered, confluence_score, reject_reasons`
+
+### Futures signals table schema
+`timestamp, pair, timeframe, signal_type, entry_triggered, bias_direction, temperature, confluence_score, funding_rate, reject_reasons`
+
+## 2026-06-09 — Signal Log filters + CSV export (spot only, original entry)
+
+### What was attempted
+- Added `signal_type`, `bias_direction`, `temperature` to spot signal SELECT — these columns do not exist in the spot DB (see fix above).
+
 ## 2026-06-07 — Extended to 5-tab multi-bot dashboard
 
 ### What changed

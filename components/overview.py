@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import psycopg2
+
+_PAGE_SIZES = [25, 50, 100]
 
 
 def render(conn):
@@ -111,4 +112,30 @@ def _render_open_positions(conn):
         st.info("No open positions.")
         return
 
-    st.dataframe(df, use_container_width=True)
+    # ── Pagination ────────────────────────────────────────────────────────────
+    total_rows = len(df)
+    page_size = st.selectbox("Baris per halaman", _PAGE_SIZES, index=1, key="spt_pos_page_size")
+    total_pages = max(1, -(-total_rows // page_size))
+
+    if st.session_state.get("spt_pos_page_size_prev") != page_size:
+        st.session_state["spt_pos_page_size_prev"] = page_size
+        st.session_state["spt_pos_page"] = 1
+
+    page = st.session_state.get("spt_pos_page", 1)
+    page = max(1, min(page, total_pages))
+    st.session_state["spt_pos_page"] = page
+
+    col_prev, col_info, col_next = st.columns([1, 4, 1])
+    with col_prev:
+        if st.button("← Prev", key="spt_pos_prev", disabled=page <= 1):
+            st.session_state["spt_pos_page"] -= 1
+            st.rerun()
+    with col_info:
+        st.caption(f"Halaman **{page}** dari **{total_pages}** · {total_rows} posisi")
+    with col_next:
+        if st.button("Next →", key="spt_pos_next", disabled=page >= total_pages):
+            st.session_state["spt_pos_page"] += 1
+            st.rerun()
+
+    start = (page - 1) * page_size
+    st.dataframe(df.iloc[start : start + page_size], use_container_width=True)
